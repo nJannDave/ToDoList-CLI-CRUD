@@ -1,0 +1,75 @@
+package reposity
+import (
+    "context"
+    "github.com/jackc/pgx/v5/pgxpool"  
+    "github.com/joho/godotenv"
+    "os"
+    "fmt"
+    "time"
+    "sync"
+)
+
+var (
+    db *pgxpool.Pool 
+    dbOnce sync.Once
+)
+
+const defaultDBURL = "postgres://dbuser:dbpass@dbhost:dbport/dbname?pool_max_conns=?"
+
+func LoadEnv() {
+    err := godotenv.Load()
+    if err != nil {
+        fmt.Errorf("❌ ERROR : Gagal memuat .env file, pakai default / env sistem! : %w", err)
+        return
+    }
+}
+
+func ConnectDb() error {
+    var initErr error
+    dbOnce.Do(func() {
+        LoadEnv()
+        linkDb := os.Getenv("DATABASE_URL")
+        if linkDb == "" {
+            linkDb = defaultDBURL
+        }
+        config, err := pgxpool.ParseConfig(linkDb)
+        if err != nil {
+            initErr = fmt.Errorf("❌ ERROR : Gagal membaca konfigurasi database! : %w", err)
+            return
+        }
+        config.MaxConns = 10
+        config.MinConns = 2 
+        config.HealthCheckPeriod = 1 * time.Minute
+        config.MaxConnLifetime = 2 * time.Hour
+        ctx, cancel := context.WithTimeout(context.Background(), 5 * time.Second)
+        defer cancel()
+        pool, err := pgxpool.NewWithConfig(ctx, config)
+        if err != nil {
+            initErr = fmt.Errorf("❌ ERROR : Gagal Connect ke DB! : %w", err)
+            return
+        }
+        if err = pool.Ping(ctx); err != nil {
+            initErr = fmt.Errorf("❌ ERROR : Gagal ping database : %w", err)
+            return
+        }
+        db = pool
+        fmt.Println("✅ Berhasil Connect ke Database!")
+        fmt.Println("")
+    })
+    return initErr
+}
+
+func CloseDb() {
+    if db != nil {
+        fmt.Println("")
+        fmt.Println("🔴 Koneksi ke Database Telah Diputus")
+        db.Close()
+    }
+}
+
+func GetDb() (*pgxpool.Pool, error) {
+    if db == nil {
+        return nil, fmt.Errorf("❌ ERROR : Database belum terinisialisasi")
+    }
+    return db, nil
+}
